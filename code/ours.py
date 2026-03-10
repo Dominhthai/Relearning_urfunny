@@ -20,6 +20,8 @@ from sklearn import preprocessing
 from sklearn.cluster import KMeans
 from sklearn.metrics import accuracy_score
 from operator import mod
+from URFunny_task import Funny_Task
+from utils.config import Config, DEFAULT_URFUNNY_PARAMS
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -28,7 +30,7 @@ warnings.filterwarnings('ignore')
 def get_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', required=True, type=str,
-                        help='KineticSound, CREMAD, K400, VGGSound, Audioset,VGGPart,UCF101')
+                        help='KineticSound, CREMAD, K400, VGGSound, Audioset,VGGPart,UCF101,URFunny')
     parser.add_argument('--model', default='model', type=str)
     parser.add_argument('--n_classes', default=6, type=int)
     parser.add_argument('--batch_size', default=64, type=int)
@@ -96,9 +98,9 @@ def purity_score(y_true, y_pred):
 
 
 
-def reinit_score(args, train_audio,train_visual,train_label,val_audio,val_visual,val_label):
-    all_feature=[train_audio,val_audio,train_visual,val_visual]
-    stages=['train_audio','val_audio','train_visual','val_visual']
+def reinit_score(args, train_visual,train_text,train_label,val_visual,val_text,val_label):
+    all_feature=[train_visual,val_visual,train_text,val_text]
+    stages=['train_visual','val_visual','train_text','val_text']
     all_purity=[]
 
     for idx,fea in enumerate(all_feature):
@@ -119,50 +121,50 @@ def reinit_score(args, train_audio,train_visual,train_label,val_audio,val_visual
         print('%s purity= %.4f' % (stages[idx],purity))
         print('%%%%%%%%%%%%%%%%%%%%%%%%') 
     
-    purity_gap_audio=np.abs(all_purity[0]-all_purity[1])
-    purity_gap_visual=np.abs(all_purity[2]-all_purity[3])
+    purity_gap_visual=np.abs(all_purity[0]-all_purity[1])
+    purity_gap_text=np.abs(all_purity[2]-all_purity[3])
 
 
-    weight_audio=torch.tanh(torch.tensor(args.move_lambda*purity_gap_audio))
     weight_visual=torch.tanh(torch.tensor(args.move_lambda*purity_gap_visual))
+    weight_text=torch.tanh(torch.tensor(args.move_lambda*purity_gap_text))
 
-    print('weight audio')
-    print(weight_audio)
     print('weight visual')
     print(weight_visual)
+    print('weight text')
+    print(weight_text)
 
 
-    return weight_audio,weight_visual
+    return weight_visual,weight_text
  
 
 
-def reinit(args, model,checkpoint,weight_audio,weight_visual):
+def reinit(args, model,checkpoint,weight_visual,weight_text):
 
 
     print("Start reinit ... ")
 
 
-    record_names_audio = []
     record_names_visual = []
+    record_names_text = []
     for name, param in model.named_parameters():
-        if 'audio_net' in name:
-            if('conv' in name):
-                record_names_audio.append((name, param))
-        elif 'visual_net' in name:
-            if('conv' in name):
+        if 'visual_encoder' in name:
+            if('linear' in name or 'norm' in name):
                 record_names_visual.append((name, param))
+        elif 'text_encoder' in name:
+            if('linear' in name or 'norm' in name):
+                record_names_text.append((name, param))
 
 
     for name, param in model.named_parameters():
-        if 'audio_net' in name:
-            init_weight=checkpoint[name]
-            current_weight=param.data
-            new_weight=weight_audio*init_weight+(1-weight_audio).cuda()*current_weight
-            param.data=new_weight
-        elif 'visual_net' in name:
+        if 'visual_encoder' in name:
             init_weight=checkpoint[name]
             current_weight=param.data
             new_weight=weight_visual*init_weight+(1-weight_visual).cuda()*current_weight
+            param.data=new_weight
+        elif 'text_encoder' in name:
+            init_weight=checkpoint[name]
+            current_weight=param.data
+            new_weight=weight_text*init_weight+(1-weight_text).cuda()*current_weight
             param.data=new_weight
 
     
@@ -186,14 +188,27 @@ def train_epoch(args, epoch, model, device, dataloader, optimizer):
 
 
 
-    for step, (spec, images, label) in tqdm(enumerate(dataloader)):
-
+    # for step, (spec, images, label) in tqdm(enumerate(dataloader)):
+    # For URFunny dataloader
+    for step,(feature,feature_length,index,label) in tqdm(enumerate(dataloader)):    
 
         optimizer.zero_grad()
-        images = images.to(device)
-        spec = spec.to(device)
-        label = label.to(device)
-        out,_,_,_,_ = model(spec.float(), images.float())
+        # images = images.to(device)
+        # spec = spec.to(device)
+        # label = label.to(device)
+
+        # For URFunny
+        vision = feature[0].float().to(device)
+        audio = feature[1].float().to(device)
+        text = feature[2].float().to(device)
+        label = label.squeeze(1).to(device)
+
+        # # For CREMA-D
+        # out,_,_,_,_ = model(spec.float(), images.float())
+
+        # For URFunny
+        # Forward pass (GradMod_2Modality returns None for audio slots)
+        _, _, _, _, m_v_out, m_t_out, out = model(vision, audio, text, feature_length)
 
         loss_mm = criterion(out, label)
 
@@ -231,6 +246,8 @@ def valid(args, model, device, dataloader):
         n_classes = 527
     elif args.dataset == 'UCF101':
         n_classes = 101
+    elif args.dataset == 'URFunny':
+        n_classes = 2
 
     cri = nn.CrossEntropyLoss()
     _loss = 0
@@ -245,23 +262,33 @@ def valid(args, model, device, dataloader):
         all_label = []
         all_out = []
 
-        for step, (spec, images, label) in tqdm(enumerate(dataloader)):
+        # # For CREMAD dataloader
+        # for step, (spec, images, label) in tqdm(enumerate(dataloader)):
+        # For URFunny dataloader
+        for step, (feature, feature_length, index, label) in enumerate(dataloader):
 
+            # # CREMA-D
+            # spec = spec.to(device)
+            # images = images.to(device)
+            # label = label.to(device)
+            # URFunny
+            vision, audio, text = feature[0].float().to(device), feature[1].float().to(device), feature[2].float().to(device)
+            label = label.squeeze(1).to(device)
 
-            spec = spec.to(device)
-            images = images.to(device)
-            label = label.to(device)
+            # # CREMA-D model
+            # prediction_all = model(spec.float(), images.float())
+            # URFunny model
+            _, _, _, _, m_v_out, m_t_out, out = model(vision, audio, text, feature_length)
 
-            prediction_all = model(spec.float(), images.float())
-
-
-            _, prob = torch.max(prediction_all[0], 1)
-            prob_all.extend(prob.cpu().numpy()) #求每一行的最大值索引
+            # _, prob = torch.max(prediction_all[0], 1)
+            # prob_all.extend(prob.cpu().numpy()) #求每一行的最大值索引
+            # label_all.extend(label.cpu().numpy())
+            _, prob = torch.max(out, 1)
+            prob_all.extend(prob.cpu().numpy()) # append predicted labels
             label_all.extend(label.cpu().numpy())
 
-
-
-            prediction=F.softmax(prediction_all[0])
+            # prediction=F.softmax(prediction_all[0])
+            prediction = F.softmax(out) # apply softmax to get probabilities
 
             loss = cri(prediction, label)
             _loss += loss.item()
@@ -281,6 +308,8 @@ def valid(args, model, device, dataloader):
                     ss = torch.zeros(31)
                 elif args.dataset == 'CREMAD':
                     ss = torch.zeros(6)
+                elif args.dataset == "URFunny":
+                    ss = torch.zeros(2)
                 ss[label[i]] = 1
                 all_label.append(ss.numpy())
 
@@ -299,29 +328,32 @@ def valid(args, model, device, dataloader):
 
 def get_feature(args, epoch, model, device, dataloader):
     model.eval()
-    all_audio=[]
     all_visual=[]
+    all_text=[]
     all_label=[]
 
 
     with torch.no_grad():
-        for step, (spec, images, label) in tqdm(enumerate(dataloader)):
-
-            images = images.to(device)
-            spec = spec.to(device)
-            label = label.to(device)
-            _,_,_,a,v = model(spec.float(), images.float())
-            all_audio.append(a.data.cpu())
-            all_visual.append(v.data.cpu())
+        # For URFunny dataloader
+        for step, (feature, feature_length, index, label) in tqdm(enumerate(dataloader)):
+            vision = feature[0].float().to(device)
+            audio = feature[1].float().to(device)  # Will be ignored by GradMod_2Modality
+            text = feature[2].float().to(device)
+            label = label.squeeze(1).to(device)
+            
+            # Get features from URFunny model
+            _, _, _, _, m_v_out, m_t_out, _ = model(vision, audio, text, feature_length)
+            all_visual.append(m_v_out.data.cpu())
+            all_text.append(m_t_out.data.cpu())
             all_label.append(label.data.cpu())
     
-    all_audio=torch.cat(all_audio)
     all_visual=torch.cat(all_visual)
+    all_text=torch.cat(all_text)
     all_label=torch.cat(all_label)
 
 
 
-    return all_audio,all_visual,all_label
+    return all_visual,all_text,all_label
 
 
 
@@ -337,7 +369,16 @@ def main():
     gpu_ids = list(range(torch.cuda.device_count()))
 
     device = torch.device('cuda:0')
-    model = AVClassifier(args)
+    if args.dataset == 'CREMAD':
+        # For CREMA-D model
+        model = AVClassifier(args)
+        task = None
+    elif args.dataset == 'URFunny':
+        # For URFunny model - use fixed parameters but inherit main training params from args
+        cfgs = Config(fixed_params=DEFAULT_URFUNNY_PARAMS) 
+        task = Funny_Task(cfgs, batch_size=args.batch_size)
+        model = task.model
+
     model.to(device)
     model = torch.nn.DataParallel(model, device_ids=gpu_ids)
     model.cuda()
@@ -354,15 +395,20 @@ def main():
         train_dataset = AVDataset_CD(mode='my_train')
         test_dataset = AVDataset_CD(mode='test')
         val_dataset=AVDataset_CD(mode='val')
-
-    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size,
+        # For CREMA-D DataLoader
+        train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size,
                                   shuffle=True, num_workers=16, pin_memory=False)
-    
-    val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size,
+        
+        val_dataloader = DataLoader(val_dataset, batch_size=args.batch_size,
                                   shuffle=False, num_workers=16, pin_memory=False)
 
-    test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size,
+        test_dataloader = DataLoader(test_dataset, batch_size=args.batch_size,
                                  shuffle=False, num_workers=16)
+    elif args.dataset == 'URFunny':
+        # For URFunny DataLoader (task is defined above)
+        train_dataloader = task.train_dataloader
+        test_dataloader = task.dep_dataloader
+        val_dataloader = task.valid_dataloader
 
     if args.optimizer == 'sgd':
         optimizer = optim.SGD(model.parameters(), lr=args.learning_rate, momentum=0.9, weight_decay=1e-4)
@@ -420,11 +466,18 @@ def main():
                 if(flag_reinit<=args.reinit_num):
                     print('reinit %d' % flag_reinit)
                     print("Start getting training feature ... ")
-                    train_audio,train_visual,train_label=get_feature(args, epoch, model, device, train_dataloader)
-                    print("Start getting evluating feature ... ")
-                    val_audio,val_visual,val_label=get_feature(args, epoch, model, device, val_dataloader)
-                    weight_audio,weight_visual= reinit_score(args, train_audio,train_visual,train_label,val_audio,val_visual,val_label)
-                    model=reinit(args, model,checkpoint,weight_audio,weight_visual)
+                    if args.dataset == 'CREMAD':
+                        train_audio,train_visual,train_label=get_feature(args, epoch, model, device, train_dataloader)
+                        print("Start getting evluating feature ... ")
+                        val_audio,val_visual,val_label=get_feature(args, epoch, model, device, val_dataloader)
+                        weight_audio,weight_visual= reinit_score(args, train_audio,train_visual,train_label,val_audio,val_visual,val_label)
+                        model=reinit(args, model,checkpoint,weight_audio,weight_visual)
+                    elif args.dataset == 'URFunny':
+                        train_visual,train_text,train_label=get_feature(args, epoch, model, device, train_dataloader)
+                        print("Start getting evaluating feature ... ")
+                        val_visual,val_text,val_label=get_feature(args, epoch, model, device, val_dataloader)
+                        weight_visual,weight_text= reinit_score(args, train_visual,train_text,train_label,val_visual,val_text,val_label)
+                        model=reinit(args, model,checkpoint,weight_visual,weight_text)
 
 
 
