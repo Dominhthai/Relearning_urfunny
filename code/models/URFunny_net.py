@@ -1,7 +1,7 @@
 import torch
 
 from torch import nn,Tensor
-from model.utils.module_base import Transformer,MLP,MaxOut_MLP
+from models.utils.module_base import Transformer,MLP,MaxOut_MLP
 
 class Modality_Text(nn.Module):
     def __init__(self):

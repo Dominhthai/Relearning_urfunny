@@ -1,6 +1,6 @@
 from torch.optim import SGD,AdamW,lr_scheduler
-from dataloader.URFunny_loader import URFunny_Dataloader
-from model.URFunny_net import GradMod,Audio_Transformer,Visual_Transformer,Text_Transformer,Later_Fusion_Model_Sum,GradMod_2Modality
+from dataset.URFunny_loader import URFunny_Dataloader
+from models.URFunny_net import GradMod,Audio_Transformer,Visual_Transformer,Text_Transformer,Later_Fusion_Model_Sum,GradMod_2Modality
 
 class Funny_Task(object):
     def __init__(self,cfgs, batch_size=16):

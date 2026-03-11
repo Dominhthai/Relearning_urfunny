@@ -60,6 +60,9 @@ DEFAULT_URFUNNY_PARAMS = {
     # Dataset identifier
     'dataset': 'URFunny',
     
+    # URFunny dataset path - MUST be set to your URFunny pickle file location
+    'data_root': None,  # TODO: Set this to your URFunny data file path (e.g., 'path/to/urfunny_data.pkl')
+    
     # URFunny model architecture parameters
     'fusion_type': 'late_fusion',  # Used in URFunny_net.py
     

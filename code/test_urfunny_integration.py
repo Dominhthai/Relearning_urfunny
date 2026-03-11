@@ -13,14 +13,18 @@ def test_config():
     """Test that Config can be instantiated with fixed parameters"""
     print("Testing Config with fixed parameters...")
     try:
-        cfgs = Config(fixed_params=DEFAULT_URFUNNY_PARAMS)
+        # For testing, we'll use a dummy data_root path
+        test_params = DEFAULT_URFUNNY_PARAMS.copy()
+        test_params['data_root'] = 'dummy_path_for_testing.pkl'  # Override for testing
+        
+        cfgs = Config(fixed_params=test_params)
         print(f"✓ Config created successfully")
         print(f"  Dataset: {cfgs.dataset}")
+        print(f"  Data root: {cfgs.data_root}")
         print(f"  Fusion type: {cfgs.fusion_type}")
         print(f"  Max pad: {cfgs.max_pad}")
         print(f"  Aligned: {cfgs.aligned}")
-        print("  ✓ All parameters are actually used in URFunny components")
-        print("  ✓ No dead/unused parameters")
+        print("  ⚠️  Note: Set data_root to your actual URFunny pickle file path")
         return cfgs
     except Exception as e:
         print(f"✗ Config creation failed: {e}")
