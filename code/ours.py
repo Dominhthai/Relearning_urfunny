@@ -31,6 +31,8 @@ def get_arguments():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset', required=True, type=str,
                         help='KineticSound, CREMAD, K400, VGGSound, Audioset,VGGPart,UCF101,URFunny')
+    parser.add_argument('--data_root', default=None, type=str, 
+                        help='Path to URFunny dataset pickle file (required for URFunny)')
     parser.add_argument('--model', default='model', type=str)
     parser.add_argument('--n_classes', default=6, type=int)
     parser.add_argument('--batch_size', default=64, type=int)
@@ -376,6 +378,11 @@ def main():
     elif args.dataset == 'URFunny':
         # For URFunny model - use fixed parameters but inherit main training params from args
         cfgs = Config(fixed_params=DEFAULT_URFUNNY_PARAMS) 
+        # Override data_root from command line argument
+        if args.data_root is not None:
+            cfgs.data_root = args.data_root
+        else:
+            raise ValueError("--data_root is required for URFunny dataset. Please specify the path to URFunny pickle file.")
         task = Funny_Task(cfgs, batch_size=args.batch_size)
         model = task.model
 
